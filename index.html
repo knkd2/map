@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>資安小鎮</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #2c3e50;
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
+        
+        .ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1000;
+        }
+        
+        .top-ui {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 10px;
+            display: flex;
+            gap: 30px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        
+        .resource {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .resource-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+        }
+        
+        .tech-icon { background: #3498db; }
+        .cia-icon { background: #e74c3c; }
+        
+        .bottom-ui {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            pointer-events: auto;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .bottom-ui:hover {
+            background: rgba(0, 0, 0, 0.9);
+        }
+        
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 14px;
+        }
+        
+        .info-panel {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            pointer-events: auto;
+            display: none;
+            max-width: 400px;
+            text-align: center;
+        }
+        
+        .close-btn {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container"></div>
+    
+    <div class="ui-overlay">
+        <div class="top-ui">
+            <div class="resource">
+                <div class="resource-icon tech-icon"></div>
+                <span>科技點: <span id="tech-points">100</span></span>
+            </div>
+            <div class="resource">
+                <div class="resource-icon cia-icon"></div>
+                <span>CIA防禦值: <span id="cia-defense">30</span></span>
+            </div>
+        </div>
+        
+        <div class="bottom-ui" onclick="toggleNPC()">
+            <div style="font-weight: bold; margin-bottom: 5px;">📡 資安助手</div>
+            <div style="font-size: 12px;">點擊查看選項</div>
+        </div>
+        
+        <div class="controls">
+            <div><strong>控制說明:</strong></div>
+            <div>↑↓←→ 移動角色</div>
+            <div>Enter 檢視區域</div>
+            <div>滑鼠拖動 移動視野</div>
+        </div>
+        
+        <div class="info-panel" id="info-panel">
+            <button class="close-btn" onclick="closeInfoPanel()">×</button>
+            <h3 id="info-title">區域資訊</h3>
+            <p id="info-description">這裡是區域描述</p>
+            <div id="info-actions"></div>
+        </div>
+    </div>
+
+    <script>
+        // 遊戲狀態
+        let gameState = {
+            techPoints: 100,
+            ciaDefense: 30,
+            castleLevel: 1,
+            playerX: 0,
+            playerY: 0,
+            cameraX: 0,
+            cameraY: 0
+        };
+
+        // PIXI 應用初始化
+        const app = new PIXI.Application({
+            width: window.innerWidth,
+            height: window.innerHeight,
+            backgroundColor: 0x1a252f,
+            antialias: true
+        });
+
+        document.getElementById('game-container').appendChild(app.view);
+
+        // 創建容器
+        const worldContainer = new PIXI.Container();
+        const mapContainer = new PIXI.Container();
+        const playerContainer = new PIXI.Container();
+
+        worldContainer.addChild(mapContainer);
+        worldContainer.addChild(playerContainer);
+        app.stage.addChild(worldContainer);
+
+        // 地圖設定
+        const TILE_SIZE = 64;
+        const MAP_SIZE = 21; // 21x21 格子
+        const CENTER = Math.floor(MAP_SIZE / 2);
+
+        // 創建地圖
+        function createMap() {
+            // 創建格子背景
+            for (let x = 0; x < MAP_SIZE; x++) {
+                for (let y = 0; y < MAP_SIZE; y++) {
+                    const tile = new PIXI.Graphics();
+                    const tileX = (x - CENTER) * TILE_SIZE;
+                    const tileY = (y - CENTER) * TILE_SIZE;
+                    
+                    // 計算距離中心的距離
+                    const distanceFromCenter = Math.max(Math.abs(x - CENTER), Math.abs(y - CENTER));
+                    
+                    let color;
+                    let alpha = 1;
+                    
+                    if (distanceFromCenter === 0) {
+                        // 城堡 (中心)
+                        color = 0xf1c40f; // 金黃色
+                        tile.beginFill(color, alpha);
+                        tile.drawRect(0, 0, TILE_SIZE, TILE_SIZE);
+                        tile.lineStyle(3, 0xe67e22);
+                        tile.drawRect(0, 0, TILE_SIZE, TILE_SIZE);
+                        
+                        // 添加城堡標誌
+                        const castleText = new PIXI.Text('🏰', {
+                            fontSize: 32,
+                            fill: 0x8b4513
+                        });
+                        castleText.anchor.set(0.5);
+                        castleText.x = TILE_SIZE / 2;
+                        castleText.y = TILE_SIZE / 2;
+                        tile.addChild(castleText);
+                        
+                    } else if (distanceFromCenter <= 2) {
+                        // CIA 城牆區域
+                        color = 0x27ae60; // 綠色
+                        tile.beginFill(color, alpha);
+                        tile.drawRect(0, 0, TILE_SIZE, TILE_SIZE);
+                        
+                        if (distanceFromCenter === 1) {
+                            // CIA 城牆
+                            tile.lineStyle(4, 0x1e8449);
+                            tile.drawRect(0, 0, TILE_SIZE, TILE_SIZE);
+                            
+                            const wallText = new PIXI.Text('CIA', {
+                                fontSize: 12,
+                                fill: 0xffffff,
+                                fontWeight: 'bold'
+                            });
+                            wallText.anchor.set(0.5);
+                            wallText.x = TILE_SIZE / 2;
+                            wallText.y = TILE_SIZE / 2;
+                            tile.addChild(wallText);
+                        } else {
+                            // 建築區域
+                            const buildText = new PIXI.Text('🏗️', {
+                                fontSize: 20
+                            });
+                            buildText.anchor.set(0.5);
+                            buildText.x = TILE_SIZE / 2;
+                            buildText.y = TILE_SIZE / 2;
+                            tile.addChild(buildText);
+                        }
+                        
+                    } else if (distanceFromCenter <= 6) {
+                        // OWASP 城牆區域
+                        color = 0x3498db; // 藍色
+                        alpha = 0.8;
+                        tile.beginFill(color, alpha);
+                        tile.drawRect(0, 0, TILE_SIZE, TILE_SIZE);
+                        
+                        if (distanceFromCenter === 6) {
+                            // OWASP 城牆
+                            tile.lineStyle(3, 0x2980b9);
+                            tile.drawRect(0, 0, TILE_SIZE, TILE_SIZE);
+                            
+                            const owaspText = new PIXI.Text('OWASP', {
+                                fontSize: 10,
+                                fill: 0xffffff,
+                                fontWeight: 'bold'
+                            });
+                            owaspText.anchor.set(0.5);
+                            owaspText.x = TILE_SIZE / 2;
+                            owaspText.y = TILE_SIZE / 2;
+                            tile.addChild(owaspText);
+                        }
+                        
+                    } else {
+                        // 未知區域
+                        color = 0x34495e; // 深灰色
+                        alpha = 0.6;
+                        tile.beginFill(color, alpha);
+                        tile.drawRect(0, 0, TILE_SIZE, TILE_SIZE);
+                        
+                        const unknownText = new PIXI.Text('?', {
+                            fontSize: 24,
+                            fill: 0x95a5a6
+                        });
+                        unknownText.anchor.set(0.5);
+                        unknownText.x = TILE_SIZE / 2;
+                        unknownText.y = TILE_SIZE / 2;
+                        tile.addChild(unknownText);
+                    }
+                    
+                    tile.x = tileX;
+                    tile.y = tileY;
+                    tile.interactive = true;
+                    tile.buttonMode = true;
+                    
+                    // 添加點擊事件
+                    tile.on('pointerdown', () => {
+                        showAreaInfo(x, y, distanceFromCenter);
+                    });
+                    
+                    mapContainer.addChild(tile);
+                }
+            }
+        }
+
+        // 創建玩家
+        function createPlayer() {
+            const player = new PIXI.Graphics();
+            player.beginFill(0xe74c3c);
+            player.drawCircle(0, 0, 15);
+            player.endFill();
+            
+            // 添加玩家標誌
+            const playerIcon = new PIXI.Text('👤', {
+                fontSize: 20
+            });
+            playerIcon.anchor.set(0.5);
+            player.addChild(playerIcon);
+            
+            playerContainer.addChild(player);
+            return player;
+        }
+
+        // 顯示區域資訊
+        function showAreaInfo(x, y, distance) {
+            const panel = document.getElementById('info-panel');
+            const title = document.getElementById('info-title');
+            const description = document.getElementById('info-description');
+            const actions = document.getElementById('info-actions');
+            
+            let areaName, areaDesc, areaActions = '';
+            
+            if (distance === 0) {
+                areaName = '城堡核心';
+                areaDesc = `等級 ${gameState.castleLevel} 城堡<br>產出: ${gameState.castleLevel * 10} 科技點/秒`;
+                areaActions = '<button onclick="upgradeCastle()">升級城堡</button>';
+            } else if (distance === 1) {
+                areaName = 'CIA 防禦城牆';
+                areaDesc = 'Confidentiality, Integrity, Availability<br>資安三大核心防線';
+                areaActions = '<button onclick="reinforceWall()">強化城牆</button>';
+            } else if (distance === 2) {
+                areaName = '建築區域';
+                areaDesc = '可建造軍事或科技建築<br>提供防禦力或科技點產出';
+                areaActions = '<button onclick="buildStructure()">建造建築</button>';
+            } else if (distance === 6) {
+                areaName = 'OWASP 防禦城牆';
+                areaDesc = 'OWASP Top 10 資安威脅防線<br>抵禦外部攻擊';
+                areaActions = '<button onclick="repairOwasp()">修復城牆</button>';
+            } else if (distance > 6) {
+                areaName = '未知領域';
+                areaDesc = '充滿資源與危險的區域<br>需要回答問題來開發';
+                areaActions = '<button onclick="exploreArea()">探索區域</button>';
+            } else {
+                areaName = '安全區域';
+                areaDesc = '受到保護的區域';
+            }
+            
+            title.innerHTML = areaName;
+            description.innerHTML = areaDesc;
+            actions.innerHTML = areaActions;
+            panel.style.display = 'block';
+        }
+
+        // 關閉資訊面板
+        function closeInfoPanel() {
+            document.getElementById('info-panel').style.display = 'none';
+        }
+
+        // 遊戲操作函數
+        function upgradeCastle() {
+            if (gameState.techPoints >= gameState.castleLevel * 100) {
+                gameState.techPoints -= gameState.castleLevel * 100;
+                gameState.castleLevel++;
+                updateUI();
+                alert(`城堡升級至等級 ${gameState.castleLevel}！`);
+            } else {
+                alert('科技點不足！');
+            }
+            closeInfoPanel();
+        }
+
+        function reinforceWall() {
+            if (gameState.techPoints >= 50) {
+                gameState.techPoints -= 50;
+                gameState.ciaDefense += 10;
+                updateUI();
+                alert('CIA城牆強化成功！');
+            } else {
+                alert('科技點不足！');
+            }
+            closeInfoPanel();
+        }
+
+        function buildStructure() {
+            alert('建築系統開發中...');
+            closeInfoPanel();
+        }
+
+        function repairOwasp() {
+            alert('OWASP城牆修復系統開發中...');
+            closeInfoPanel();
+        }
+
+        function exploreArea() {
+            alert('探索系統開發中...\n將來會有問答題目！');
+            closeInfoPanel();
+        }
+
+        function toggleNPC() {
+            alert('NPC功能開發中...\n將包含:\n• 小地圖\n• 成就系統\n• 背包\n• 事件記錄\n• 答題記錄');
+        }
+
+        // 更新UI
+        function updateUI() {
+            document.getElementById('tech-points').textContent = gameState.techPoints;
+            document.getElementById('cia-defense').textContent = gameState.ciaDefense;
+        }
+
+        // 鍵盤控制
+        const keys = {};
+        const player = createPlayer();
+
+        window.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+            
+            if (e.code === 'Enter') {
+                const gridX = Math.floor((gameState.playerX + TILE_SIZE/2) / TILE_SIZE) + CENTER;
+                const gridY = Math.floor((gameState.playerY + TILE_SIZE/2) / TILE_SIZE) + CENTER;
+                const distance = Math.max(Math.abs(gridX - CENTER), Math.abs(gridY - CENTER));
+                showAreaInfo(gridX, gridY, distance);
+            }
+        });
+
+        // 遊戲循環
+        function gameLoop() {
+            const speed = 3;
+            
+            if (keys['ArrowUp'] || keys['KeyW']) {
+                gameState.playerY -= speed;
+            }
+            if (keys['ArrowDown'] || keys['KeyS']) {
+                gameState.playerY += speed;
+            }
+            if (keys['ArrowLeft'] || keys['KeyA']) {
+                gameState.playerX -= speed;
+            }
+            if (keys['ArrowRight'] || keys['KeyD']) {
+                gameState.playerX += speed;
+            }
+            
+            // 更新玩家位置
+            player.x = gameState.playerX;
+            player.y = gameState.playerY;
+            
+            // 相機跟隨玩家
+            const targetX = -gameState.playerX + app.screen.width / 2;
+            const targetY = -gameState.playerY + app.screen.height / 2;
+            
+            worldContainer.x += (targetX - worldContainer.x) * 0.1;
+            worldContainer.y += (targetY - worldContainer.y) * 0.1;
+        }
+
+        // 滑鼠拖動視野
+        let isDragging = false;
+        let dragStart = { x: 0, y: 0 };
+
+        app.view.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            dragStart.x = e.clientX;
+            dragStart.y = e.clientY;
+        });
+
+        app.view.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                const deltaX = e.clientX - dragStart.x;
+                const deltaY = e.clientY - dragStart.y;
+                
+                worldContainer.x += deltaX * 0.5;
+                worldContainer.y += deltaY * 0.5;
+                
+                dragStart.x = e.clientX;
+                dragStart.y = e.clientY;
+            }
+        });
+
+        app.view.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        // 自動產生科技點
+        setInterval(() => {
+            gameState.techPoints += gameState.castleLevel * 10;
+            updateUI();
+        }, 1000);
+
+        // 初始化遊戲
+        createMap();
+        updateUI();
+        app.ticker.add(gameLoop);
+
+        // 響應式設計
+        window.addEventListener('resize', () => {
+            app.renderer.resize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
