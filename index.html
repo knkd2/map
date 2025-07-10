@@ -145,6 +145,13 @@
     </div>
 
     <script>
+        //等角轉換
+        function toIsometric(x, y) {
+            const isoX = (x - y) * (TILE_SIZE / 2);
+            const isoY = (x + y) * (TILE_SIZE / 4); // 調低高度比例，讓等角角度更自然
+            return { x: isoX, y: isoY };
+        }
+
         // 遊戲狀態
         let gameState = {
             techPoints: 100,
@@ -186,8 +193,9 @@
             for (let x = 0; x < MAP_SIZE; x++) {
                 for (let y = 0; y < MAP_SIZE; y++) {
                     const tile = new PIXI.Graphics();
-                    const tileX = (x - CENTER) * TILE_SIZE;
-                    const tileY = (y - CENTER) * TILE_SIZE;
+                    const iso = toIsometric(x - CENTER,y - CENTER)
+                    const tileX = iso.x;
+                    const tileY = iso.y;
                     
                     // 計算距離中心的距離
                     const distanceFromCenter = Math.max(Math.abs(x - CENTER), Math.abs(y - CENTER));
@@ -449,6 +457,7 @@
             }
             
             // 更新玩家位置
+            const playerIso = toIsometric(gameState.playerX / TILE_SIZE, gameState.playerY / TILE_SIZE);
             player.x = gameState.playerX;
             player.y = gameState.playerY;
             
